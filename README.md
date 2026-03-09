@@ -1,10 +1,23 @@
 # Second Brain Service
 
-This repo is a self-hosted second-brain service for bringing personal work context into one searchable system.
+Second Brain Service is a self-hosted personal knowledge layer for bringing work context from multiple tools into one searchable system.
 
 The goal is to help a user pull together different sources of information, make sense of ongoing work, and support assistant-style workflows over that combined context.
 
-Today, Gmail is the first fully implemented source. The service is structured to grow into additional sources over time, including things like Slack messages, notes, calendars, and other messaging systems.
+Today, Gmail is the first fully implemented source. The service is structured to grow into additional sources over time, including Slack messages, notes, calendars, and other messaging systems.
+
+In practice, that means:
+
+- source-specific connectors ingest or receive personal work data
+- shared storage and retrieval layers normalize that data into one searchable corpus
+- MCP and HTTP interfaces let an assistant search, fetch, and reason across that context
+
+## Current status
+
+- Current supported source: Gmail
+- Intended future sources: Slack, notes, calendars, and other messaging tools
+- Default deployment model: local-first and self-hosted
+- Optional remote mode: expose only the MCP endpoint for ChatGPT or other MCP clients
 
 Current stack:
 

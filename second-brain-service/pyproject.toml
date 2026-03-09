@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "second-brain-service"
 version = "0.2.0"
-description = "Gmail ingestion, search, and MCP service for the second-brain workspace"
+description = "Self-hosted second-brain service for ingesting and searching personal work context"
 requires-python = ">=3.12"
 dependencies = [
   "beautifulsoup4==4.13.3",

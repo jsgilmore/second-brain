@@ -2,7 +2,7 @@
 
 ## Scope
 
-This project is a self-hosted Gmail knowledge and MCP stack. Contributions should preserve the privacy and safety assumptions already documented in `AGENTS.md` and the docs under `docs/`.
+This project is a self-hosted second-brain service with Gmail as the first implemented source. Contributions should preserve the privacy and safety assumptions already documented in `AGENTS.md` and the docs under `docs/`.
 
 ## Development Workflow
 
