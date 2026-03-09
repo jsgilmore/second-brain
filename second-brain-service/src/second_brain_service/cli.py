@@ -3,7 +3,7 @@ import json
 from typing import Optional
 
 from second_brain_service.ingest.gmail_sync import parse_args as parse_gmail_args
-from second_brain_service.ingest.gmail_sync import rehydrate_gmail_messages, run_sync_from_args
+from second_brain_service.ingest.gmail_sync import rechunk_gmail_messages, rehydrate_gmail_messages, run_sync_from_args
 from second_brain_service.interfaces.http_api import serve_http
 from second_brain_service.interfaces.remote_mcp import serve_remote_mcp
 from second_brain_service.interfaces.stdio_mcp import serve_stdio_mcp
@@ -19,6 +19,11 @@ def main(argv: Optional[list[str]] = None) -> None:
     subcommands.add_parser("apply-schema")
     rehydrate_parser = subcommands.add_parser("rehydrate-gmail")
     rehydrate_parser.add_argument("--limit", type=int)
+    rechunk_parser = subcommands.add_parser("rechunk-gmail")
+    rechunk_parser.add_argument("--limit", type=int)
+    rechunk_parser.add_argument("--batch-size", type=int, default=25)
+    rechunk_parser.add_argument("--dry-run", action="store_true")
+    rechunk_parser.add_argument("--disable-embeddings", action="store_true")
     gmail_parser = subcommands.add_parser("gmail-sync")
     gmail_parser.add_argument("gmail_mode", choices=["backfill", "incremental"])
     gmail_parser.add_argument("--credentials", required=True)
@@ -44,6 +49,19 @@ def main(argv: Optional[list[str]] = None) -> None:
         return
     if args.command == "rehydrate-gmail":
         print(json.dumps(rehydrate_gmail_messages(limit=args.limit), default=str))
+        return
+    if args.command == "rechunk-gmail":
+        print(
+            json.dumps(
+                rechunk_gmail_messages(
+                    limit=args.limit,
+                    batch_size=args.batch_size,
+                    dry_run=args.dry_run,
+                    disable_embeddings=args.disable_embeddings,
+                ),
+                default=str,
+            )
+        )
         return
     if args.command == "gmail-sync":
         gmail_args = parse_gmail_args(

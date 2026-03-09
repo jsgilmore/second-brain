@@ -6,7 +6,7 @@ PIP := $(VENV)/bin/pip
 SERVICE_SRC := ./second-brain-service/src
 RUN_SERVICE := PYTHONPATH=$(SERVICE_SRC) $(PYTHON) -m second_brain_service.cli
 
-.PHONY: up down logs ps setup-python mcp-stdio apply-schema rehydrate-gmail gmail-backfill gmail-backfill-resume gmail-backfill-12mo gmail-incremental ollama-pull
+.PHONY: up down logs ps setup-python mcp-stdio apply-schema rehydrate-gmail rechunk-gmail gmail-backfill gmail-backfill-resume gmail-backfill-12mo gmail-incremental ollama-pull
 
 up:
 	docker compose up -d --build
@@ -32,6 +32,9 @@ apply-schema: setup-python
 
 rehydrate-gmail: setup-python
 	$(RUN_SERVICE) rehydrate-gmail
+
+rechunk-gmail: setup-python
+	$(RUN_SERVICE) rechunk-gmail
 
 gmail-backfill: setup-python
 	$(RUN_SERVICE) gmail-sync backfill --credentials ./config/gmail-oauth-client.json --token ./config/gmail-token.json

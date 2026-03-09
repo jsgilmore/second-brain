@@ -845,3 +845,166 @@ def rehydrate_gmail_messages(limit: Optional[int] = None) -> dict[str, Any]:
         conn.commit()
 
     return {"status": "ok", "processed": processed, "skipped": skipped, "limit": limit}
+
+
+def rechunk_gmail_messages(
+    limit: Optional[int] = None,
+    batch_size: int = COMMIT_INTERVAL,
+    dry_run: bool = False,
+    disable_embeddings: bool = False,
+) -> dict[str, Any]:
+    """Re-chunk all stored Gmail messages using the new section-aware pipeline.
+
+    Reads ``raw_payload`` from the ``messages`` table, re-extracts body text
+    using the same extraction logic as initial ingestion, runs the new chunker,
+    and replaces old chunks in-place.  No Gmail API calls are made.
+
+    Args:
+        limit: Maximum number of messages to process (``None`` = all).
+        batch_size: How many messages to process between commits.
+        dry_run: When ``True``, log what would happen but don't write anything.
+        disable_embeddings: When ``True``, generate chunks without embeddings.
+    """
+    import sys
+
+    embedding_client = EmbeddingClient(enabled=not disable_embeddings)
+    processed = 0
+    skipped = 0
+    failed = 0
+    old_chunk_count = 0
+    new_chunk_count = 0
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            query = """
+                SELECT m.id AS message_id, m.subject, m.raw_payload,
+                       (SELECT COUNT(*) FROM message_chunks mc WHERE mc.message_id = m.id) AS existing_chunks
+                FROM messages m
+                WHERE m.source = %s
+                  AND m.raw_payload <> '{}'::jsonb
+                ORDER BY m.sent_at DESC
+            """
+            params: list[Any] = [DEFAULT_MAIL_SOURCE]
+            if limit is not None:
+                query += " LIMIT %s"
+                params.append(limit)
+            cur.execute(query, params)
+            rows = cur.fetchall()
+
+            total = len(rows)
+            print(
+                f"rechunk: found {total} messages to process"
+                + (f" (limit={limit})" if limit else "")
+                + (" [DRY RUN]" if dry_run else ""),
+                file=sys.stderr,
+                flush=True,
+            )
+
+            for row in rows:
+                raw_payload = row.get("raw_payload")
+                message_id = row.get("message_id")
+                existing = row.get("existing_chunks", 0)
+
+                if not isinstance(raw_payload, dict) or not raw_payload.get("id"):
+                    skipped += 1
+                    continue
+
+                try:
+                    # Re-extract body text using the same path as initial ingestion
+                    payload_inner = raw_payload.get("payload", {})
+                    headers = extract_headers(payload_inner)
+                    subject = sanitize_text(headers.get("subject"))
+                    _, sender_email = parseaddr(headers.get("from", ""))
+                    sender_email = sanitize_text(sender_email)
+                    body_text, body_html = extract_body(payload_inner, sender_email)
+                    body_text = sanitize_text(body_text)
+                    body_html = sanitize_text(body_html) if body_html else None
+                    if not body_text:
+                        body_text = sanitize_text(
+                            clean_extracted_text(raw_payload.get("snippet", ""), sender_email)
+                        )
+
+                    chunks = build_message_chunks(
+                        subject, body_text, embedding_client,
+                        body_html=body_html, headers=headers,
+                    )
+
+                    old_chunk_count += existing
+                    new_chunk_count += len(chunks)
+
+                    if not dry_run:
+                        # Replace old chunks with new ones
+                        from psycopg.types.json import Jsonb
+
+                        cur.execute(
+                            "DELETE FROM message_chunks WHERE message_id = %s",
+                            (message_id,),
+                        )
+                        for chunk in chunks:
+                            embedding = chunk.get("embedding")
+                            if embedding is not None and len(embedding) != EMBEDDING_DIMENSION:
+                                raise ValueError(
+                                    f"embedding length {len(embedding)} != EMBEDDING_DIMENSION={EMBEDDING_DIMENSION}"
+                                )
+                            cur.execute(
+                                """
+                                INSERT INTO message_chunks
+                                    (message_id, chunk_index, chunk_text, embedding_model, embedding, metadata)
+                                VALUES (%s, %s, %s, %s, %s, %s)
+                                """,
+                                (
+                                    message_id,
+                                    chunk.get("chunk_index", 0),
+                                    chunk["text"],
+                                    chunk.get("embedding_model"),
+                                    embedding,
+                                    Jsonb(chunk.get("metadata", {})),
+                                ),
+                            )
+
+                    processed += 1
+
+                    if processed % batch_size == 0:
+                        if not dry_run:
+                            conn.commit()
+                        print(
+                            f"rechunk: progress {processed}/{total}"
+                            f" (old_chunks={old_chunk_count}, new_chunks={new_chunk_count})",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
+                except Exception as exc:
+                    failed += 1
+                    print(
+                        f"rechunk: failed message_id={message_id}: {exc}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    # Roll back the current transaction savepoint but keep going
+                    conn.rollback()
+                    continue
+
+            if not dry_run:
+                conn.commit()
+
+    result = {
+        "status": "ok",
+        "processed": processed,
+        "skipped": skipped,
+        "failed": failed,
+        "old_chunk_count": old_chunk_count,
+        "new_chunk_count": new_chunk_count,
+        "dry_run": dry_run,
+    }
+    if limit is not None:
+        result["limit"] = limit
+
+    print(
+        f"rechunk: done — processed={processed} skipped={skipped} failed={failed}"
+        f" old_chunks={old_chunk_count} new_chunks={new_chunk_count}"
+        + (" [DRY RUN]" if dry_run else ""),
+        file=sys.stderr,
+        flush=True,
+    )
+    return result
