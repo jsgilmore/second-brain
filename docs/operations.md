@@ -1,6 +1,6 @@
 # Operations
 
-This document collects the host-side operational commands for the local Gmail archive stack.
+This document collects the host-side operational commands for the local Second Brain Service stack. The current ingestion source is Gmail.
 
 ## Start and inspect
 

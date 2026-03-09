@@ -1,8 +1,14 @@
-# Gmail Second Brain
+# Second Brain Service
 
-This repo is a Gmail-first local stack for a self-hosted machine:
+This repo is a self-hosted second-brain service for bringing personal work context into one searchable system.
 
-- `Postgres + pgvector` stores every ingested email and its chunk embeddings
+The goal is to help a user pull together different sources of information, make sense of ongoing work, and support assistant-style workflows over that combined context.
+
+Today, Gmail is the first fully implemented source. The service is structured to grow into additional sources over time, including things like Slack messages, notes, calendars, and other messaging systems.
+
+Current stack:
+
+- `Postgres + pgvector` stores normalized source records and chunk embeddings
 - `mcp` exposes an HTTP API for ingestion and search
 - `mcp_remote` exposes an MCP server for ChatGPT or other MCP clients
 - `OpenAI text-embedding-3-large` provides remote embeddings
@@ -10,10 +16,10 @@ This repo is a Gmail-first local stack for a self-hosted machine:
 
 The core design is simple:
 
-1. Gmail messages are pulled via the Gmail API with desktop OAuth.
-2. Each message is normalized into Postgres.
-3. Email bodies are chunked and optionally embedded.
-4. The MCP server answers search and fetch requests over your mail archive.
+1. Source data is pulled or received through connector-specific ingestion paths.
+2. Records are normalized into Postgres.
+3. Searchable text is chunked and optionally embedded.
+4. The MCP server answers search and fetch requests over the resulting knowledge base.
 
 ## Working with agents
 
@@ -30,7 +36,7 @@ For new features, the default workflow is spec-first:
 
 The current folder layout is now organized around the main service:
 
-- `second-brain-service/`: the main Python service; it contains Gmail ingestion, storage, search, HTTP, and MCP code
+- `second-brain-service/`: the main Python service; it contains the shared storage, search, HTTP, and MCP code plus the current Gmail connector
 - `docker/`: Postgres bootstrap SQL and container-side setup
 - `config/`: local OAuth client and token files used on the host machine
 - `docs/`: setup, architecture, security, and operations notes
@@ -42,6 +48,8 @@ The old `mcp_server/` compatibility shim has been removed. The canonical entrypo
 
 - `docker-compose.yml`: Postgres, n8n, local API, and remote MCP services
 - `docker/postgres/init/001_init.sql`: schema, text-search functions, sync-state table
+- `docs/getting-started.md`: end-to-end setup guide for local use
+- `docs/troubleshooting.md`: common first-run failures and setup mistakes
 - `second-brain-service/src/second_brain_service/ingest/gmail_sync.py`: Gmail backfill and incremental sync logic
 - `second-brain-service/src/second_brain_service/store/mail_repository.py`: normalized mail persistence and retrieval
 - `second-brain-service/src/second_brain_service/interfaces/remote_mcp.py`: remote MCP tools for `search`, `fetch`, `fetch_thread`, and `status`
@@ -62,6 +70,8 @@ The `mcp_remote` service is behind the Docker `remote` profile and does not star
 
 ## Quick start
 
+If you are using this repo for the first time, start with [docs/getting-started.md](docs/getting-started.md).
+
 1. Copy the env template.
 
 ```bash
@@ -72,8 +82,18 @@ cp .env.example .env
 
 - `POSTGRES_PASSWORD`
 - `N8N_BASIC_AUTH_PASSWORD`
-- `OPENAI_API_KEY`
-- `PUBLIC_BASE_URL`, `REMOTE_MCP_GOOGLE_CLIENT_ID`, `REMOTE_MCP_GOOGLE_CLIENT_SECRET`, and `REMOTE_ALLOWED_EMAILS` before exposing the remote MCP service
+- `OPENAI_API_KEY` if you keep the default `EMBEDDING_PROVIDER=openai`
+
+If you switch to `EMBEDDING_PROVIDER=ollama`, you do not need `OPENAI_API_KEY`.
+
+For a first local run, the defaults for ports, database name/user, and embedding model are already usable from `.env.example`.
+
+Only set remote MCP values when you are ready to expose the remote profile:
+
+- `PUBLIC_BASE_URL`
+- `REMOTE_MCP_GOOGLE_CLIENT_ID`
+- `REMOTE_MCP_GOOGLE_CLIENT_SECRET`
+- `REMOTE_ALLOWED_EMAILS` or `REMOTE_ALLOWED_DOMAINS`
 
 3. Start the local stack.
 
@@ -97,6 +117,8 @@ curl http://localhost:8080/healthz
 make gmail-backfill
 ```
 
+The first host-side `make` command creates `.venv/` automatically and installs the Python dependencies needed for the Gmail sync CLI.
+
 If a backfill is interrupted, resume it from the saved checkpoint:
 
 ```bash
@@ -119,7 +141,9 @@ curl http://localhost:8080/search \
 
 8. If you want n8n to keep indexing newly received mail after the initial backfill, follow [docs/n8n-gmail-ingest.md](docs/n8n-gmail-ingest.md).
 
-## Gmail sync model
+If setup fails, see [docs/troubleshooting.md](docs/troubleshooting.md).
+
+## Current Gmail connector
 
 The Gmail sync command supports:
 
@@ -150,12 +174,12 @@ PYTHONPATH=./second-brain-service/src python3 -m second_brain_service.cli gmail-
   --token ./config/gmail-token.json
 ```
 
-With the default setup, the sync creates embeddings through OpenAI using `text-embedding-3-large`. If `OPENAI_API_KEY` is missing, mail can still be ingested with `--disable-embeddings`, but semantic search will not work until you generate embeddings.
+With the default setup, the Gmail connector creates embeddings through OpenAI using `text-embedding-3-large`. If `OPENAI_API_KEY` is missing, mail can still be ingested with `--disable-embeddings`, but semantic search will not work until you generate embeddings.
 Only a full unfiltered backfill saves the Gmail incremental cursor in `sync_state`. Trial runs with `--query`, `--label`, or `--max-messages` do not advance the cursor.
 
 ## Data model
 
-Each Gmail message is stored as:
+The current source-specific schema is Gmail-oriented. Each Gmail message is stored as:
 
 - one `messages` row with subject, body text, HTML, key RFC headers, raw Gmail payload, and metadata
 - one `conversations` row keyed by Gmail thread ID

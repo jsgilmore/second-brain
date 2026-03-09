@@ -2,11 +2,11 @@
 
 ## Current focus
 
-This repo is now Gmail-first.
+This repo is a general second-brain service. The current implemented source is Gmail.
 
 The main service folder is `second-brain-service/`. It contains the mail ingestion/search service as a whole, not only MCP-specific code.
 
-- `Postgres + pgvector` is the durable mail archive
+- `Postgres + pgvector` is the durable local knowledge store
 - `gmail_sync.py` handles Gmail backfill and incremental sync
 - `mcp` serves the local ingestion and search API
 - `mcp_remote` serves the MCP surface for ChatGPT and other MCP clients
@@ -39,7 +39,7 @@ The main service folder is `second-brain-service/`. It contains the mail ingesti
 2. semantic search over `message_chunks.embedding` if embeddings exist
 3. reciprocal-rank fusion in the application layer
 
-This gives you reasonable results even before the whole mailbox has embeddings.
+This gives you reasonable results even before the whole Gmail corpus has embeddings.
 
 ## Embedding strategy
 

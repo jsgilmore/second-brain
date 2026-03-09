@@ -20,15 +20,19 @@ cp .env.example .env
 make up
 ```
 
-## 3. Configure remote embeddings
+## 3. Configure embeddings
 
-Set `OPENAI_API_KEY` in `.env`.
+With the default setup, set `OPENAI_API_KEY` in `.env`.
+
+If you plan to use local Ollama embeddings instead, set `EMBEDDING_PROVIDER=ollama` and configure the Ollama values from `.env.example`.
 
 ## 4. Run the first backfill
 
 ```bash
 make gmail-backfill
 ```
+
+The first host-side `make` command creates `.venv/` automatically and installs the Python dependencies used by the Gmail sync CLI.
 
 If the backfill is interrupted, resume it from the saved checkpoint:
 
