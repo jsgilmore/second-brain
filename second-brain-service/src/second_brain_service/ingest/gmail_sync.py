@@ -14,7 +14,8 @@ from googleapiclient.discovery import build
 
 from second_brain_service.common.config import DEFAULT_MAIL_SOURCE, EMBEDDING_DIMENSION
 from second_brain_service.common.sanitize import sanitize_jsonish, sanitize_text
-from second_brain_service.search.embeddings import EmbeddingClient, build_message_chunks
+from second_brain_service.search.chunking import build_message_chunks
+from second_brain_service.search.embeddings import EmbeddingClient
 from second_brain_service.store.connection import get_connection
 from second_brain_service.store.mail_repository import upsert_message_record_with_retry
 from second_brain_service.store.maintenance import delete_sync_state, get_sync_state, set_sync_state
@@ -449,7 +450,7 @@ def normalize_gmail_message(
     participants = extract_participants(headers)
     sender_participant = next((item for item in participants if item["participant_type"] == "from"), None)
     distinct_participant_emails = {item["email"] for item in participants if item.get("email")}
-    chunks = build_message_chunks(subject, body_text, embedding_client)
+    chunks = build_message_chunks(subject, body_text, embedding_client, body_html=body_html, headers=headers)
 
     return {
         "source": DEFAULT_MAIL_SOURCE,

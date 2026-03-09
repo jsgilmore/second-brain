@@ -23,6 +23,9 @@ EMBED_QUERY_PREFIX = os.environ.get(
 )
 CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "6000"))
 CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", "400"))
+CHUNK_TARGET_TOKENS = int(os.environ.get("CHUNK_TARGET_TOKENS", "256"))
+CHUNK_MAX_TOKENS = int(os.environ.get("CHUNK_MAX_TOKENS", "512"))
+CHUNK_OVERLAP_TOKENS = int(os.environ.get("CHUNK_OVERLAP_TOKENS", "32"))
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
 DEFAULT_MAIL_SOURCE = os.environ.get("DEFAULT_MAIL_SOURCE", "gmail")
 REMOTE_MCP_AUTH_REQUIRED = os.environ.get("REMOTE_MCP_AUTH_REQUIRED", "true").lower() in {"1", "true", "yes", "on"}
