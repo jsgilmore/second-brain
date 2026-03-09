@@ -45,17 +45,13 @@ For new features, the default workflow is spec-first:
 - create `specs/<feature-name>/task-list.md`
 - stop for review before implementation
 
-## Repo map
-
-The current folder layout is now organized around the main service:
+## Project layout
 
 - `second-brain-service/`: the main Python service; it contains the shared storage, search, HTTP, and MCP code plus the current Gmail connector
 - `docker/`: Postgres bootstrap SQL and container-side setup
 - `config/`: local OAuth client and token files used on the host machine
 - `docs/`: setup, architecture, security, and operations notes
 - `logs/`: local run logs
-
-The old `mcp_server/` compatibility shim has been removed. The canonical entrypoint is under `second-brain-service/`.
 
 ## What is in the repo
 
@@ -69,7 +65,6 @@ The old `mcp_server/` compatibility shim has been removed. The canonical entrypo
 - `docs/gmail-setup.md`: Google Cloud OAuth and first sync steps
 - `docs/chatgpt-mcp.md`: exposing the remote MCP service for ChatGPT
 - `docs/operations.md`: operational commands, resume/recovery flow, and database upgrade tasks
-- `docs/cleanup-plan.md`: current structure and compatibility notes
 
 ## Services
 

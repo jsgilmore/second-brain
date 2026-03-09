@@ -114,4 +114,4 @@ These paths are local runtime state and should not be treated as source:
 - `config/gmail-token.json`
 - `config/gmail-oauth-client.json`
 
-Root-level temporary analysis files should be moved under `tmp/` in a later cleanup pass after active migration jobs are finished.
+If you create local temporary analysis files while operating the stack, keep them under `tmp/` rather than in the repo root.
