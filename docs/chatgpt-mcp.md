@@ -10,6 +10,22 @@ The stack now binds all published ports to `127.0.0.1`, so nothing is reachable 
 
 The remote MCP service now expects Google OAuth plus an explicit allowlist. That means the final public URL must also be configured as the OAuth base URL for the remote MCP server.
 
+## Exposure options
+
+You need a stable public HTTPS URL for ChatGPT to reach your MCP server.
+
+Common options:
+
+- `Tailscale Funnel`: quickest path for a personal self-hosted setup if you already use Tailscale
+- `Cloudflare Tunnel`: managed public exposure without opening router ports
+- `Caddy` or `Nginx` on your own domain: best when you want full control over DNS and TLS
+
+Choose one approach and keep the same final HTTPS base URL for:
+
+- `PUBLIC_BASE_URL`
+- the Google OAuth web client settings
+- the MCP URL you add in ChatGPT
+
 ## Minimal path
 
 1. Run the local stack:
@@ -37,6 +53,78 @@ Typical options:
 Example target shape:
 
 `https://mail-mcp.example.com/sse`
+
+## Tailscale Funnel path
+
+`Tailscale Funnel` is a good option for a personal setup, but it has a few requirements:
+
+- Tailscale must be installed and logged in on the machine running this repo
+- `MagicDNS` must be enabled on your tailnet
+- Funnel must be allowed in your tailnet policy
+- Funnel only works on specific public HTTPS ports, not arbitrary public ports
+
+Suggested flow:
+
+1. Start the local services:
+
+```bash
+make up
+docker compose --profile remote up -d mcp_remote
+```
+
+2. Verify the local remote MCP endpoint responds:
+
+```bash
+curl http://localhost:8000/healthz
+```
+
+3. Create a Funnel to the local remote MCP service:
+
+```bash
+tailscale funnel 8000
+```
+
+Tailscale will print a public HTTPS URL in your `*.ts.net` domain.
+
+4. Set `PUBLIC_BASE_URL` in `.env` to that HTTPS origin, without `/sse`.
+
+Example:
+
+```dotenv
+PUBLIC_BASE_URL=https://your-machine-name.your-tailnet.ts.net
+```
+
+5. Create a Google OAuth `Web application` client for the same public origin and set:
+
+- Authorized JavaScript origin: `https://your-machine-name.your-tailnet.ts.net`
+- Authorized redirect URI: `https://your-machine-name.your-tailnet.ts.net/auth/callback`
+
+6. Set the remote auth values in `.env`:
+
+```dotenv
+REMOTE_MCP_AUTH_REQUIRED=true
+REMOTE_MCP_GOOGLE_CLIENT_ID=your-web-oauth-client-id.apps.googleusercontent.com
+REMOTE_MCP_GOOGLE_CLIENT_SECRET=your-web-oauth-client-secret
+REMOTE_ALLOWED_EMAILS=you@example.com
+```
+
+7. Restart the remote MCP service so it picks up the new environment:
+
+```bash
+docker compose --profile remote up -d mcp_remote
+```
+
+8. Add the server in ChatGPT using:
+
+```text
+https://your-machine-name.your-tailnet.ts.net/sse
+```
+
+Notes:
+
+- The first Funnel enablement may require approval in the Tailscale admin flow.
+- Public DNS for the Funnel hostname can take a few minutes to propagate.
+- Keep the local API on `8080`, Postgres on `5432`, and n8n on `5678` private. Only expose the MCP endpoint.
 
 ## Required auth settings
 
