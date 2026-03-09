@@ -1,0 +1,115 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: second-brain-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: second-brain-n8n
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      N8N_HOST: ${N8N_HOST}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL}
+      N8N_EDITOR_BASE_URL: ${N8N_EDITOR_BASE_URL}
+      N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE}
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD}
+      TZ: America/Los_Angeles
+    ports:
+      - "127.0.0.1:${N8N_PORT}:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+  mcp:
+    build:
+      context: ./second-brain-service
+    container_name: second-brain-mcp
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      API_PORT: ${MCP_API_PORT}
+      MCP_REMOTE_PORT: ${MCP_REMOTE_PORT}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER}
+      DEFAULT_MAIL_SOURCE: ${DEFAULT_MAIL_SOURCE}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL}
+      EMBED_QUERY_PREFIX: ${EMBED_QUERY_PREFIX}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL}
+      CHUNK_SIZE: ${CHUNK_SIZE}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+      REMOTE_MCP_AUTH_REQUIRED: ${REMOTE_MCP_AUTH_REQUIRED}
+      REMOTE_MCP_GOOGLE_CLIENT_ID: ${REMOTE_MCP_GOOGLE_CLIENT_ID}
+      REMOTE_MCP_GOOGLE_CLIENT_SECRET: ${REMOTE_MCP_GOOGLE_CLIENT_SECRET}
+      REMOTE_ALLOWED_EMAILS: ${REMOTE_ALLOWED_EMAILS}
+      REMOTE_ALLOWED_DOMAINS: ${REMOTE_ALLOWED_DOMAINS}
+    ports:
+      - "127.0.0.1:${MCP_API_PORT}:8080"
+    command: ["python", "-m", "second_brain_service.cli", "serve-http"]
+
+  mcp_remote:
+    build:
+      context: ./second-brain-service
+    container_name: second-brain-mcp-remote
+    profiles:
+      - remote
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      API_PORT: ${MCP_API_PORT}
+      MCP_REMOTE_PORT: ${MCP_REMOTE_PORT}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER}
+      DEFAULT_MAIL_SOURCE: ${DEFAULT_MAIL_SOURCE}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL}
+      EMBED_QUERY_PREFIX: ${EMBED_QUERY_PREFIX}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL}
+      CHUNK_SIZE: ${CHUNK_SIZE}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+      REMOTE_MCP_AUTH_REQUIRED: ${REMOTE_MCP_AUTH_REQUIRED}
+      REMOTE_MCP_GOOGLE_CLIENT_ID: ${REMOTE_MCP_GOOGLE_CLIENT_ID}
+      REMOTE_MCP_GOOGLE_CLIENT_SECRET: ${REMOTE_MCP_GOOGLE_CLIENT_SECRET}
+      REMOTE_ALLOWED_EMAILS: ${REMOTE_ALLOWED_EMAILS}
+      REMOTE_ALLOWED_DOMAINS: ${REMOTE_ALLOWED_DOMAINS}
+    ports:
+      - "127.0.0.1:${MCP_REMOTE_PORT}:8000"
+    volumes:
+      - fastmcp_data:/root/.local/share/fastmcp
+    command: ["python", "-m", "second_brain_service.cli", "serve-remote-mcp"]
+
+volumes:
+  postgres_data:
+  n8n_data:
+  fastmcp_data:
