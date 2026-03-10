@@ -19,6 +19,11 @@ dependencies = [
   "python-dotenv==1.1.1",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "pytest==9.0.2",
+]
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 

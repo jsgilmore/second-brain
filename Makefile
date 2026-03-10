@@ -6,7 +6,7 @@ PIP := $(VENV)/bin/pip
 SERVICE_SRC := ./second-brain-service/src
 RUN_SERVICE := PYTHONPATH=$(SERVICE_SRC) $(PYTHON) -m second_brain_service.cli
 
-.PHONY: up down logs ps setup-python mcp-stdio apply-schema rehydrate-gmail rechunk-gmail gmail-backfill gmail-backfill-resume gmail-backfill-12mo gmail-incremental ollama-pull
+.PHONY: up down logs ps setup-python setup-python-dev test evaluate-chunking mcp-stdio apply-schema rehydrate-gmail rechunk-gmail gmail-backfill gmail-backfill-resume gmail-backfill-12mo gmail-incremental ollama-pull
 
 up:
 	docker compose up -d --build
@@ -23,6 +23,15 @@ ps:
 setup-python:
 	$(PYTHON_BIN) -m venv $(VENV)
 	$(PIP) install -r second-brain-service/requirements.txt
+
+setup-python-dev: setup-python
+	$(PIP) install -r second-brain-service/requirements-dev.txt
+
+test: setup-python-dev
+	PYTHONPATH=$(SERVICE_SRC) $(PYTHON) -m pytest second-brain-service/tests
+
+evaluate-chunking: setup-python-dev
+	$(RUN_SERVICE) evaluate-chunking
 
 mcp-stdio: setup-python
 	docker compose run --rm mcp python -m second_brain_service.cli serve-stdio-mcp

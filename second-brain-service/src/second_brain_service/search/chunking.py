@@ -70,6 +70,15 @@ class Chunk:
     metadata: dict = field(default_factory=dict)
 
 
+@dataclass
+class ChunkingDiagnostics:
+    section_count: int = 0
+    unknown_section_count: int = 0
+    oversized_candidate_count: int = 0
+    sentence_split_count: int = 0
+    word_fallback_count: int = 0
+
+
 # ---------------------------------------------------------------------------
 # Section detection patterns
 # ---------------------------------------------------------------------------
@@ -152,7 +161,7 @@ def _normalize_preserve_structure(text: str) -> str:
 # Stage 2: Section detection
 # ---------------------------------------------------------------------------
 
-def _detect_sections(text: str) -> list[Section]:
+def _detect_sections(text: str, diagnostics: Optional[ChunkingDiagnostics] = None) -> list[Section]:
     """Segment *text* into a list of :class:`Section` objects.
 
     Uses deterministic heuristics; uncertain regions get type ``"unknown"``.
@@ -226,11 +235,11 @@ def _detect_sections(text: str) -> list[Section]:
             continue
 
         # --- Default: continue current section -------------------------
-        # If we were in a quote/forward section and hit a non-quoted,
-        # non-empty line (and it isn't a forwarded-header field line),
-        # switch back to body.
+        # Quotes usually end once the ">"-prefixed or reply-header block ends,
+        # but forwarded content should remain a forwarded section until an
+        # explicit new boundary is detected.
         if (
-            current["type"] in ("quote", "forward")
+            current["type"] == "quote"
             and line.strip()
             and not _FWD_FIELD_RE.match(line)
             and not _QUOTE_PREFIX_RE.match(line)
@@ -269,6 +278,9 @@ def _detect_sections(text: str) -> list[Section]:
                 source_role="unknown",
             )
         )
+    if diagnostics is not None:
+        diagnostics.section_count = len(sections)
+        diagnostics.unknown_section_count = sum(1 for section in sections if section.section_type == "unknown")
     return sections
 
 
@@ -292,17 +304,25 @@ def _split_into_paragraphs(text: str) -> list[str]:
     return paragraphs
 
 
-def _split_oversized(text: str, max_tokens: int) -> list[str]:
+def _split_oversized(
+    text: str,
+    max_tokens: int,
+    diagnostics: Optional[ChunkingDiagnostics] = None,
+) -> list[str]:
     """Split a single oversized text block into pieces that fit *max_tokens*.
 
     Tries sentence boundaries first, then falls back to word-level splitting.
     """
     if estimate_tokens(text) <= max_tokens:
         return [text]
+    if diagnostics is not None:
+        diagnostics.oversized_candidate_count += 1
 
     # Try sentence-level splitting
     sentences = _SENTENCE_SPLIT_RE.split(text)
     if len(sentences) > 1:
+        if diagnostics is not None:
+            diagnostics.sentence_split_count += 1
         pieces: list[str] = []
         current = ""
         for sentence in sentences:
@@ -314,7 +334,7 @@ def _split_oversized(text: str, max_tokens: int) -> list[str]:
                     pieces.append(current)
                 # If a single sentence exceeds max_tokens, force-split on words
                 if estimate_tokens(sentence) > max_tokens:
-                    pieces.extend(_force_split_words(sentence, max_tokens))
+                    pieces.extend(_force_split_words(sentence, max_tokens, diagnostics=diagnostics))
                     current = ""
                 else:
                     current = sentence
@@ -323,11 +343,17 @@ def _split_oversized(text: str, max_tokens: int) -> list[str]:
         return pieces
 
     # Single block with no sentence boundaries – force-split on words
-    return _force_split_words(text, max_tokens)
+    return _force_split_words(text, max_tokens, diagnostics=diagnostics)
 
 
-def _force_split_words(text: str, max_tokens: int) -> list[str]:
+def _force_split_words(
+    text: str,
+    max_tokens: int,
+    diagnostics: Optional[ChunkingDiagnostics] = None,
+) -> list[str]:
     """Last-resort: split on word boundaries to stay within *max_tokens*."""
+    if diagnostics is not None:
+        diagnostics.word_fallback_count += 1
     words = text.split()
     pieces: list[str] = []
     current_words: list[str] = []
@@ -353,6 +379,7 @@ def _build_section_chunks(
     target_tokens: int,
     max_tokens: int,
     overlap_tokens: int,
+    diagnostics: Optional[ChunkingDiagnostics] = None,
 ) -> list[str]:
     """Build chunk texts from a single section.
 
@@ -382,7 +409,7 @@ def _build_section_chunks(
     split_candidates: list[str] = []
     for candidate in candidates:
         if estimate_tokens(candidate) > max_tokens:
-            split_candidates.extend(_split_oversized(candidate, max_tokens))
+            split_candidates.extend(_split_oversized(candidate, max_tokens, diagnostics=diagnostics))
         else:
             split_candidates.append(candidate)
 
@@ -442,6 +469,8 @@ def prepare_message_sections(
     body_text: str,
     body_html: Optional[str] = None,
     headers: Optional[dict] = None,
+    *,
+    diagnostics: Optional[ChunkingDiagnostics] = None,
 ) -> list[Section]:
     """Normalize text and return a list of detected sections.
 
@@ -449,7 +478,7 @@ def prepare_message_sections(
     the pipeline operates on the already-extracted plain text.
     """
     normalized = _normalize_preserve_structure(body_text)
-    return _detect_sections(normalized)
+    return _detect_sections(normalized, diagnostics=diagnostics)
 
 
 def build_chunks(
@@ -461,12 +490,13 @@ def build_chunks(
     target_tokens: int = CHUNK_TARGET_TOKENS,
     max_tokens: int = CHUNK_MAX_TOKENS,
     overlap_tokens: int = CHUNK_OVERLAP_TOKENS,
+    diagnostics: Optional[ChunkingDiagnostics] = None,
 ) -> list[Chunk]:
     """Run the full chunking pipeline and return :class:`Chunk` objects.
 
     This is the primary entry point called by ingestion code.
     """
-    sections = prepare_message_sections(subject, body_text, body_html, headers)
+    sections = prepare_message_sections(subject, body_text, body_html, headers, diagnostics=diagnostics)
 
     chunks: list[Chunk] = []
     chunk_index = 0
@@ -481,6 +511,7 @@ def build_chunks(
             target_tokens=target_tokens,
             max_tokens=max_tokens,
             overlap_tokens=overlap_tokens,
+            diagnostics=diagnostics,
         )
 
         for pos, text in enumerate(chunk_texts):
@@ -523,8 +554,9 @@ def build_message_chunks(
 
     Drop-in replacement for :func:`embeddings.build_message_chunks`.
     """
+    diagnostics = ChunkingDiagnostics()
     pipeline_chunks = build_chunks(
-        subject, body_text, body_html, headers,
+        subject, body_text, body_html, headers, diagnostics=diagnostics,
     )
 
     if not pipeline_chunks:
@@ -556,6 +588,7 @@ def build_message_chunks(
     # Build final chunk dicts
     result: list[dict] = []
     embed_idx = 0
+    embedding_failures_by_section: dict[str, int] = {}
     for chunk in pipeline_chunks:
         chunk_dict: dict = {
             "chunk_index": chunk.chunk_index,
@@ -567,14 +600,21 @@ def build_message_chunks(
             if emb is not None:
                 chunk_dict["embedding_model"] = embedding_client.model
                 chunk_dict["embedding"] = emb
+            else:
+                section_type = str(chunk.metadata.get("section_type", "unknown"))
+                embedding_failures_by_section[section_type] = embedding_failures_by_section.get(section_type, 0) + 1
             embed_idx += 1
         result.append(chunk_dict)
 
-    _log_chunk_summary(pipeline_chunks)
+    _log_chunk_summary(pipeline_chunks, diagnostics, embedding_failures_by_section)
     return result
 
 
-def _log_chunk_summary(chunks: list[Chunk]) -> None:
+def _log_chunk_summary(
+    chunks: list[Chunk],
+    diagnostics: ChunkingDiagnostics,
+    embedding_failures_by_section: dict[str, int],
+) -> None:
     """Print a short diagnostic summary to stderr."""
     total = len(chunks)
     suppressed = sum(1 for c in chunks if c.metadata.get("suppressed"))
@@ -582,7 +622,21 @@ def _log_chunk_summary(chunks: list[Chunk]) -> None:
     for c in chunks:
         st = c.metadata.get("section_type", "unknown")
         section_types[st] = section_types.get(st, 0) + 1
-    parts = [f"chunks={total}", f"suppressed={suppressed}"]
+    parts = [
+        f"sections={diagnostics.section_count}",
+        f"unknown_sections={diagnostics.unknown_section_count}",
+        f"chunks={total}",
+        f"suppressed={suppressed}",
+        f"oversized={diagnostics.oversized_candidate_count}",
+        f"sentence_splits={diagnostics.sentence_split_count}",
+        f"word_fallbacks={diagnostics.word_fallback_count}",
+    ]
     for st, count in sorted(section_types.items()):
         parts.append(f"{st}={count}")
+    if embedding_failures_by_section:
+        failure_parts = ",".join(
+            f"{section_type}:{count}"
+            for section_type, count in sorted(embedding_failures_by_section.items())
+        )
+        parts.append(f"embedding_failures={failure_parts}")
     print(f"chunking: {' '.join(parts)}", file=sys.stderr, flush=True)

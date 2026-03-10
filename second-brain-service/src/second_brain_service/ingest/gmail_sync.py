@@ -812,12 +812,20 @@ def rehydrate_gmail_messages(limit: Optional[int] = None) -> dict[str, Any]:
     embedding_client = EmbeddingClient(enabled=False)
     processed = 0
     skipped = 0
+    failed = 0
+    old_chunk_count = 0
+    new_chunk_count = 0
+    suppressed_chunk_count = 0
+    messages_with_unknown_sections = 0
+    failure_reasons: dict[str, int] = {}
 
     with get_connection() as conn:
         with conn.cursor() as cur:
             query = """
-                SELECT raw_payload
+                SELECT m.id AS message_id, m.raw_payload,
+                       (SELECT COUNT(*) FROM message_chunks mc WHERE mc.message_id = m.id) AS existing_chunks
                 FROM messages
+                AS m
                 WHERE source = %s
                   AND raw_payload <> '{}'::jsonb
                 ORDER BY sent_at DESC
@@ -829,22 +837,68 @@ def rehydrate_gmail_messages(limit: Optional[int] = None) -> dict[str, Any]:
             cur.execute(query, params)
             rows = cur.fetchall()
 
+            total = len(rows)
+            print(
+                f"rehydrate: found {total} messages to process" + (f" (limit={limit})" if limit else ""),
+                flush=True,
+            )
+
             for row in rows:
+                message_id = row.get("message_id")
                 raw_payload = row.get("raw_payload")
+                existing_chunks = int(row.get("existing_chunks") or 0)
                 if not isinstance(raw_payload, dict) or not raw_payload.get("id") or not raw_payload.get("threadId"):
                     skipped += 1
                     continue
 
-                payload = normalize_gmail_message(raw_payload, embedding_client)
-                payload.pop("chunks", None)
-                upsert_message_record_with_retry(cur, payload, EMBEDDING_DIMENSION)
-                processed += 1
-                if processed % COMMIT_INTERVAL == 0:
-                    conn.commit()
+                try:
+                    payload = normalize_gmail_message(raw_payload, embedding_client)
+                    chunks = payload.get("chunks") or []
+                    upsert_message_record_with_retry(cur, payload, EMBEDDING_DIMENSION)
+                    processed += 1
+                    old_chunk_count += existing_chunks
+                    new_chunk_count += len(chunks)
+                    suppressed_chunk_count += sum(1 for chunk in chunks if chunk.get("metadata", {}).get("suppressed"))
+                    if any(chunk.get("metadata", {}).get("section_type") == "unknown" for chunk in chunks):
+                        messages_with_unknown_sections += 1
+                    if processed % COMMIT_INTERVAL == 0:
+                        conn.commit()
+                        print(
+                            "rehydrate: progress "
+                            f"{processed}/{total} old_chunks={old_chunk_count} new_chunks={new_chunk_count} "
+                            f"suppressed_chunks={suppressed_chunk_count} "
+                            f"messages_with_unknown_sections={messages_with_unknown_sections}",
+                            flush=True,
+                        )
+                except Exception as exc:
+                    failed += 1
+                    reason = type(exc).__name__
+                    failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
+                    print(f"rehydrate: failed message_id={message_id}: {exc}", flush=True)
 
         conn.commit()
 
-    return {"status": "ok", "processed": processed, "skipped": skipped, "limit": limit}
+    result = {
+        "status": "ok",
+        "processed": processed,
+        "skipped": skipped,
+        "failed": failed,
+        "old_chunk_count": old_chunk_count,
+        "new_chunk_count": new_chunk_count,
+        "suppressed_chunk_count": suppressed_chunk_count,
+        "messages_with_unknown_sections": messages_with_unknown_sections,
+        "failure_reasons": failure_reasons,
+    }
+    if limit is not None:
+        result["limit"] = limit
+    print(
+        "rehydrate: done "
+        f"processed={processed} skipped={skipped} failed={failed} old_chunks={old_chunk_count} "
+        f"new_chunks={new_chunk_count} suppressed_chunks={suppressed_chunk_count} "
+        f"messages_with_unknown_sections={messages_with_unknown_sections}",
+        flush=True,
+    )
+    return result
 
 
 def rechunk_gmail_messages(
@@ -861,11 +915,14 @@ def rechunk_gmail_messages(
 
     Args:
         limit: Maximum number of messages to process (``None`` = all).
-        batch_size: How many messages to process between commits.
+        batch_size: How many successful messages to process between progress logs.
         dry_run: When ``True``, log what would happen but don't write anything.
         disable_embeddings: When ``True``, generate chunks without embeddings.
     """
     import sys
+
+    if batch_size < 1:
+        raise ValueError("batch_size must be at least 1")
 
     embedding_client = EmbeddingClient(enabled=not disable_embeddings)
     processed = 0
@@ -873,6 +930,9 @@ def rechunk_gmail_messages(
     failed = 0
     old_chunk_count = 0
     new_chunk_count = 0
+    suppressed_chunk_count = 0
+    messages_with_unknown_sections = 0
+    failure_reasons: dict[str, int] = {}
 
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -924,69 +984,67 @@ def rechunk_gmail_messages(
                             clean_extracted_text(raw_payload.get("snippet", ""), sender_email)
                         )
 
-                    chunks = build_message_chunks(
-                        subject, body_text, embedding_client,
-                        body_html=body_html, headers=headers,
-                    )
+                    chunks = build_message_chunks(subject, body_text, embedding_client, body_html=body_html, headers=headers)
+
+                    if not dry_run:
+                        from psycopg.types.json import Jsonb
+
+                        # Each message gets its own transaction so one failure
+                        # cannot roll back earlier successful replacements.
+                        with conn.transaction():
+                            cur.execute(
+                                "DELETE FROM message_chunks WHERE message_id = %s",
+                                (message_id,),
+                            )
+                            for chunk in chunks:
+                                embedding = chunk.get("embedding")
+                                if embedding is not None and len(embedding) != EMBEDDING_DIMENSION:
+                                    raise ValueError(
+                                        f"embedding length {len(embedding)} != EMBEDDING_DIMENSION={EMBEDDING_DIMENSION}"
+                                    )
+                                cur.execute(
+                                    """
+                                    INSERT INTO message_chunks
+                                        (message_id, chunk_index, chunk_text, embedding_model, embedding, metadata)
+                                    VALUES (%s, %s, %s, %s, %s, %s)
+                                    """,
+                                    (
+                                        message_id,
+                                        chunk.get("chunk_index", 0),
+                                        chunk["text"],
+                                        chunk.get("embedding_model"),
+                                        embedding,
+                                        Jsonb(chunk.get("metadata", {})),
+                                    ),
+                                )
 
                     old_chunk_count += existing
                     new_chunk_count += len(chunks)
-
-                    if not dry_run:
-                        # Replace old chunks with new ones
-                        from psycopg.types.json import Jsonb
-
-                        cur.execute(
-                            "DELETE FROM message_chunks WHERE message_id = %s",
-                            (message_id,),
-                        )
-                        for chunk in chunks:
-                            embedding = chunk.get("embedding")
-                            if embedding is not None and len(embedding) != EMBEDDING_DIMENSION:
-                                raise ValueError(
-                                    f"embedding length {len(embedding)} != EMBEDDING_DIMENSION={EMBEDDING_DIMENSION}"
-                                )
-                            cur.execute(
-                                """
-                                INSERT INTO message_chunks
-                                    (message_id, chunk_index, chunk_text, embedding_model, embedding, metadata)
-                                VALUES (%s, %s, %s, %s, %s, %s)
-                                """,
-                                (
-                                    message_id,
-                                    chunk.get("chunk_index", 0),
-                                    chunk["text"],
-                                    chunk.get("embedding_model"),
-                                    embedding,
-                                    Jsonb(chunk.get("metadata", {})),
-                                ),
-                            )
-
+                    suppressed_chunk_count += sum(1 for chunk in chunks if chunk.get("metadata", {}).get("suppressed"))
+                    if any(chunk.get("metadata", {}).get("section_type") == "unknown" for chunk in chunks):
+                        messages_with_unknown_sections += 1
                     processed += 1
 
                     if processed % batch_size == 0:
-                        if not dry_run:
-                            conn.commit()
                         print(
                             f"rechunk: progress {processed}/{total}"
-                            f" (old_chunks={old_chunk_count}, new_chunks={new_chunk_count})",
+                            f" (old_chunks={old_chunk_count}, new_chunks={new_chunk_count},"
+                            f" suppressed_chunks={suppressed_chunk_count},"
+                            f" messages_with_unknown_sections={messages_with_unknown_sections})",
                             file=sys.stderr,
                             flush=True,
                         )
 
                 except Exception as exc:
                     failed += 1
+                    reason = type(exc).__name__
+                    failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                     print(
                         f"rechunk: failed message_id={message_id}: {exc}",
                         file=sys.stderr,
                         flush=True,
                     )
-                    # Roll back the current transaction savepoint but keep going
-                    conn.rollback()
                     continue
-
-            if not dry_run:
-                conn.commit()
 
     result = {
         "status": "ok",
@@ -995,6 +1053,9 @@ def rechunk_gmail_messages(
         "failed": failed,
         "old_chunk_count": old_chunk_count,
         "new_chunk_count": new_chunk_count,
+        "suppressed_chunk_count": suppressed_chunk_count,
+        "messages_with_unknown_sections": messages_with_unknown_sections,
+        "failure_reasons": failure_reasons,
         "dry_run": dry_run,
     }
     if limit is not None:
@@ -1003,6 +1064,9 @@ def rechunk_gmail_messages(
     print(
         f"rechunk: done — processed={processed} skipped={skipped} failed={failed}"
         f" old_chunks={old_chunk_count} new_chunks={new_chunk_count}"
+        f" suppressed_chunks={suppressed_chunk_count}"
+        f" messages_with_unknown_sections={messages_with_unknown_sections}"
+        f" failure_reasons={failure_reasons}"
         + (" [DRY RUN]" if dry_run else ""),
         file=sys.stderr,
         flush=True,

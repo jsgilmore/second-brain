@@ -7,6 +7,7 @@ from second_brain_service.ingest.gmail_sync import rechunk_gmail_messages, rehyd
 from second_brain_service.interfaces.http_api import serve_http
 from second_brain_service.interfaces.remote_mcp import serve_remote_mcp
 from second_brain_service.interfaces.stdio_mcp import serve_stdio_mcp
+from second_brain_service.search.chunking_evaluation import evaluate_chunking_corpus, render_chunking_evaluation_markdown
 from second_brain_service.store.maintenance import apply_schema_scripts
 
 
@@ -17,6 +18,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     subcommands.add_parser("serve-stdio-mcp")
     subcommands.add_parser("serve-remote-mcp")
     subcommands.add_parser("apply-schema")
+    subcommands.add_parser("evaluate-chunking")
     rehydrate_parser = subcommands.add_parser("rehydrate-gmail")
     rehydrate_parser.add_argument("--limit", type=int)
     rechunk_parser = subcommands.add_parser("rechunk-gmail")
@@ -46,6 +48,9 @@ def main(argv: Optional[list[str]] = None) -> None:
         return
     if args.command == "apply-schema":
         print(json.dumps(apply_schema_scripts(), default=str))
+        return
+    if args.command == "evaluate-chunking":
+        print(render_chunking_evaluation_markdown(evaluate_chunking_corpus()), end="")
         return
     if args.command == "rehydrate-gmail":
         print(json.dumps(rehydrate_gmail_messages(limit=args.limit), default=str))

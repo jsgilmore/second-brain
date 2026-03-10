@@ -4,13 +4,30 @@ This document breaks the design in [design.md](design.md) into implementation ta
 
 The task list is ordered to realize the design with controlled risk and clear verification points.
 
+## Implementation status snapshot
+
+Status as of 2026-03-10.
+
+- [x] Phase 1 foundations are implemented.
+- [x] Phase 2 section-aware parsing is implemented.
+- [x] Phase 3 coherent chunk building is implemented.
+- [x] Phase 4 metadata and storage integration is implemented.
+- [x] Phase 5 is implemented.
+- [x] Phase 6 is implemented.
+- [~] Phase 7 is partially implemented.
+
+Remaining implementation focus before this feature is considered complete:
+
+- [ ] Add local context expansion around matched chunks.
+- [ ] Add optional thread-level expansion driven by conversation metadata.
+
 ## Phase 1: Prepare the foundations
 
 ### 1. Define chunking configuration
 
-- add config entries for token-oriented chunk sizing and overlap
-- keep compatibility with existing config where needed during transition
-- document default values and the meaning of each setting
+- [x] add config entries for token-oriented chunk sizing and overlap
+- [x] keep compatibility with existing config where needed during transition
+- [x] document default values and the meaning of each setting
 
 Exit criteria:
 
@@ -19,9 +36,9 @@ Exit criteria:
 
 ### 2. Create a dedicated chunking module
 
-- add a new module such as `second-brain-service/src/second_brain_service/search/chunking.py`
-- move chunk-construction responsibility out of `embeddings.py`
-- keep the public interface small and deterministic
+- [x] add a new module such as `second-brain-service/src/second_brain_service/search/chunking.py`
+- [x] move chunk-construction responsibility out of `embeddings.py`
+- [x] keep the public interface small and deterministic
 
 Suggested interface:
 
@@ -34,9 +51,9 @@ Exit criteria:
 
 ### 3. Add token counting support
 
-- choose a tokenizer strategy appropriate for the embedding model
-- implement deterministic token estimation helpers
-- add fallback behavior when tokenization fails
+- [x] choose a tokenizer strategy appropriate for the embedding model
+- [x] implement deterministic token estimation helpers
+- [x] add fallback behavior when tokenization fails
 
 Exit criteria:
 
@@ -46,9 +63,9 @@ Exit criteria:
 
 ### 4. Preserve structure through normalization
 
-- stop flattening the full message body into a single whitespace stream before chunking
-- preserve paragraph and blank-line boundaries needed by sectioning
-- keep existing noise cleanup only where it does not destroy structure
+- [x] stop flattening the full message body into a single whitespace stream before chunking
+- [x] preserve paragraph and blank-line boundaries needed by sectioning
+- [x] keep existing noise cleanup only where it does not destroy structure
 
 Exit criteria:
 
@@ -56,11 +73,11 @@ Exit criteria:
 
 ### 5. Implement email section detection
 
-- detect primary body sections
-- detect quoted reply blocks
-- detect forwarded-message blocks
-- detect signatures and footer-like sections
-- detect obvious boilerplate sections when confidence is high
+- [x] detect primary body sections
+- [x] detect quoted reply blocks
+- [x] detect forwarded-message blocks
+- [x] detect signatures and footer-like sections
+- [x] detect obvious boilerplate sections when confidence is high
 
 Exit criteria:
 
@@ -68,8 +85,8 @@ Exit criteria:
 
 ### 6. Add safe fallback classification
 
-- classify uncertain regions as `unknown`
-- ensure odd formatting does not stop ingestion
+- [x] classify uncertain regions as `unknown`
+- [x] ensure odd formatting does not stop ingestion
 
 Exit criteria:
 
@@ -79,9 +96,9 @@ Exit criteria:
 
 ### 7. Build paragraph-group chunk candidates
 
-- group adjacent paragraphs within the same section
-- keep bullet lists together where reasonable
-- avoid mixing different section types in a single chunk
+- [x] group adjacent paragraphs within the same section
+- [x] keep bullet lists together where reasonable
+- [x] avoid mixing different section types in a single chunk
 
 Exit criteria:
 
@@ -89,9 +106,9 @@ Exit criteria:
 
 ### 8. Add token-aware splitting for oversized candidates
 
-- split oversized candidates on paragraph boundaries first
-- then split on sentence boundaries
-- use a deterministic hard fallback only when required
+- [x] split oversized candidates on paragraph boundaries first
+- [x] then split on sentence boundaries
+- [x] use a deterministic hard fallback only when required
 
 Exit criteria:
 
@@ -100,8 +117,8 @@ Exit criteria:
 
 ### 9. Add section-local overlap
 
-- implement overlap only within the same semantic section
-- keep overlap configurable and conservative
+- [x] implement overlap only within the same semantic section
+- [x] keep overlap configurable and conservative
 
 Exit criteria:
 
@@ -111,13 +128,13 @@ Exit criteria:
 
 ### 10. Enrich chunk metadata
 
-- store section type
-- store section index
-- store source role
-- store quote/body flags
-- store previous and next chunk linkage
-- store local position information
-- store suppression flag
+- [x] store section type
+- [x] store section index
+- [x] store source role
+- [x] store quote/body flags
+- [x] store previous and next chunk linkage
+- [x] store local position information
+- [x] store suppression flag
 
 Exit criteria:
 
@@ -125,9 +142,9 @@ Exit criteria:
 
 ### 11. Suppress or skip low-value chunks
 
-- decide which sections are dropped entirely
-- mark retained low-value chunks as suppressed
-- skip embeddings for suppressed chunks if design choice is confirmed
+- [x] decide which sections are dropped entirely
+- [x] mark retained low-value chunks as suppressed
+- [x] skip embeddings for suppressed chunks if design choice is confirmed
 
 Exit criteria:
 
@@ -135,9 +152,9 @@ Exit criteria:
 
 ### 12. Integrate with existing database writes
 
-- keep using `message_chunks.metadata` for first-pass storage
-- ensure old and new chunks remain compatible during rollout
-- verify rehydration replaces message chunks deterministically
+- [x] keep using `message_chunks.metadata` for first-pass storage
+- [x] ensure old and new chunks remain compatible during rollout
+- [x] verify rehydration replaces message chunks deterministically
 
 Exit criteria:
 
@@ -147,8 +164,8 @@ Exit criteria:
 
 ### 13. Replace the current chunking call site
 
-- update Gmail normalization to use the new chunking module
-- keep embedding behavior chunk-level and non-fatal
+- [x] update Gmail normalization to use the new chunking module
+- [x] keep embedding behavior chunk-level and non-fatal
 
 Exit criteria:
 
@@ -156,8 +173,8 @@ Exit criteria:
 
 ### 14. Update rehydration path
 
-- ensure `rehydrate-gmail` rebuilds chunks using the new logic
-- verify raw Gmail payloads contain enough data for stable regeneration
+- [x] ensure `rehydrate-gmail` rebuilds chunks using the new logic
+- [x] verify raw Gmail payloads contain enough data for stable regeneration
 
 Exit criteria:
 
@@ -167,11 +184,11 @@ Exit criteria:
 
 ### 15. Build a representative validation corpus
 
-- collect examples for short mail
-- long multi-topic mail
-- reply chains
-- forwarded threads
-- newsletters and promotions
+- [x] collect examples for short mail
+- [x] long multi-topic mail
+- [x] reply chains
+- [x] forwarded threads
+- [x] newsletters and promotions
 
 Exit criteria:
 
@@ -179,10 +196,12 @@ Exit criteria:
 
 ### 16. Add automated tests
 
-- unit tests for section detection heuristics
-- unit tests for token-aware splitting
-- regression tests for deterministic chunk output
-- tests for suppressed-section handling
+- [x] unit tests for section detection heuristics
+- [x] unit tests for token-aware splitting
+- [x] regression tests for deterministic chunk output
+- [x] tests for suppressed-section handling
+- [x] regression tests for forwarded-content section handling
+- [x] regression tests for suppressed-chunk retrieval filtering
 
 Exit criteria:
 
@@ -190,10 +209,11 @@ Exit criteria:
 
 ### 17. Add operator-facing diagnostics
 
-- log section and chunk counts
-- log fallback splitting usage
-- log suppressed chunk counts
-- log embedding failures without aborting ingestion
+- [x] log section and chunk counts
+- [x] log fallback splitting usage
+- [x] log suppressed chunk counts
+- [x] log embedding failures without aborting ingestion
+- [x] add a stable operator summary for chunking skips, parser fallbacks, and per-message rechunk failures
 
 Exit criteria:
 
@@ -201,9 +221,9 @@ Exit criteria:
 
 ### 18. Compare retrieval quality before broad rollout
 
-- run representative queries against old and new chunking
-- inspect whether results are more precise and easier to explain
-- review chunk count and embedding cost impact
+- [x] run representative queries against old and new chunking
+- [x] inspect whether results are more precise and easier to explain
+- [x] review chunk count and embedding cost impact
 
 Exit criteria:
 
@@ -213,7 +233,7 @@ Exit criteria:
 
 ### 19. Prefer non-suppressed chunks in results
 
-- update chunk retrieval and ranking logic to avoid promoting suppressed chunks unless necessary
+- [x] update chunk retrieval and ranking logic to avoid promoting suppressed chunks unless necessary
 
 Exit criteria:
 
@@ -221,8 +241,8 @@ Exit criteria:
 
 ### 20. Add local context expansion
 
-- fetch neighboring chunks around a matched chunk
-- include message-local context in result assembly where useful
+- [ ] fetch neighboring chunks around a matched chunk
+- [ ] include message-local context in result assembly where useful
 
 Exit criteria:
 
@@ -230,8 +250,8 @@ Exit criteria:
 
 ### 21. Add optional thread-level expansion
 
-- use conversation IDs and sent times to fetch nearby related messages
-- keep this optional to avoid over-expanding every result
+- [ ] use conversation IDs and sent times to fetch nearby related messages
+- [ ] keep this optional to avoid over-expanding every result
 
 Exit criteria:
 

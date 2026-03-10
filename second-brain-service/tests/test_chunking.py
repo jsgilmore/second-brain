@@ -114,9 +114,9 @@ class TestSectionDetection:
             "Original message content."
         )
         sections = prepare_message_sections(None, text)
-        types = [s.section_type for s in sections]
-        assert "body" in types
-        assert "forward" in types
+        assert [section.section_type for section in sections] == ["body", "forward"]
+        assert sections[1].source_role == "quoted_author"
+        assert "Original message content." in sections[1].text
 
     def test_outlook_original_message(self):
         text = (
@@ -261,6 +261,20 @@ class TestBuildChunks:
         body_chunks = [c for c in chunks if not c.metadata.get("is_quote")]
         assert len(quote_chunks) >= 1
         assert len(body_chunks) >= 1
+
+    def test_forwarded_content_stays_forward(self):
+        text = (
+            "FYI see below.\n\n"
+            "---------- Forwarded message ----------\n"
+            "From: someone@example.com\n"
+            "Date: Mon, Jan 1, 2024\n"
+            "Subject: Test\n\n"
+            "Original message content."
+        )
+        chunks = build_chunks(None, text)
+        assert [chunk.metadata["section_type"] for chunk in chunks] == ["body", "forward"]
+        assert chunks[1].metadata["is_quote"] is True
+        assert "Original message content." in chunks[1].text
 
     def test_metadata_keys_present(self):
         chunks = build_chunks("Sub", "Body text.")

@@ -119,6 +119,10 @@ TERM_STOPWORDS = {
 }
 
 
+def _unsuppressed_chunk_predicate(alias: str = "mc") -> str:
+    return f"COALESCE({alias}.metadata->>'suppressed', 'false') <> 'true'"
+
+
 def build_message_url(message_row: dict[str, Any]) -> str:
     public_url = (
         message_row.get("metadata", {}).get("public_url")
@@ -575,7 +579,7 @@ def lexical_search(cur, query: str, limit: int, source: Optional[str] = None) ->
 @with_connection
 def semantic_search(cur, query_embedding: list[float], limit: int, source: Optional[str] = None) -> list[dict[str, Any]]:
     cur.execute(
-        """
+        f"""
         SELECT
           m.id AS message_id,
           mc.chunk_index,
@@ -589,6 +593,7 @@ def semantic_search(cur, query_embedding: list[float], limit: int, source: Optio
         FROM message_chunks mc
         JOIN messages m ON m.id = mc.message_id
         WHERE mc.embedding IS NOT NULL
+          AND {_unsuppressed_chunk_predicate("mc")}
           AND mc.embedding_model = %s
           AND (%s::text IS NULL OR m.source = %s::text)
         ORDER BY mc.embedding <=> %s::vector ASC, m.sent_at DESC
@@ -602,7 +607,7 @@ def semantic_search(cur, query_embedding: list[float], limit: int, source: Optio
 @with_connection
 def lexical_chunk_search(cur, query: str, limit: int, source: Optional[str] = None) -> list[dict[str, Any]]:
     cur.execute(
-        """
+        f"""
         SELECT
           m.id AS message_id,
           mc.chunk_index,
@@ -615,6 +620,7 @@ def lexical_chunk_search(cur, query: str, limit: int, source: Optional[str] = No
         FROM message_chunks mc
         JOIN messages m ON m.id = mc.message_id
         WHERE mc.search_vector @@ websearch_to_tsquery('english', %s)
+          AND {_unsuppressed_chunk_predicate("mc")}
           AND (%s::text IS NULL OR m.source = %s::text)
         ORDER BY rank DESC, m.sent_at DESC
         LIMIT %s
@@ -1289,4 +1295,3 @@ def export_message_document(message_id: str) -> Optional[dict[str, Any]]:
             "sent_at": str(sent_at),
         },
     }
-
